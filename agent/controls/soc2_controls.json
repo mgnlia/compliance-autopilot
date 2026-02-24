@@ -1,0 +1,193 @@
+{
+  "framework": "SOC2 Type II",
+  "version": "2017",
+  "trust_services_criteria": {
+    "CC1": {
+      "name": "Control Environment",
+      "controls": {
+        "CC1.1": {
+          "description": "COSO Principle 1: Demonstrates commitment to integrity and ethical values",
+          "checks": [
+            "code_of_conduct_exists",
+            "security_policy_exists"
+          ],
+          "evidence_artifacts": ["CODE_OF_CONDUCT.md", "SECURITY.md", ".github/SECURITY.md"]
+        },
+        "CC1.2": {
+          "description": "COSO Principle 2: Board independence and oversight",
+          "checks": ["governance_documentation"],
+          "evidence_artifacts": ["docs/governance.md", "GOVERNANCE.md"]
+        }
+      }
+    },
+    "CC6": {
+      "name": "Logical and Physical Access Controls",
+      "controls": {
+        "CC6.1": {
+          "description": "Logical access security software, infrastructure, and architectures have been implemented to support (1) identification and authentication of authorized users; (2) restriction of authorized user access to system components, or portions thereof, authorized by management, including hardware, data, software, mobile devices, output, and offline elements; and (3) prevention and detection of unauthorized access",
+          "severity": "HIGH",
+          "checks": [
+            "mfa_enforcement",
+            "branch_protection",
+            "required_approvals",
+            "secret_detection_enabled"
+          ],
+          "evidence_artifacts": [
+            ".gitlab-ci.yml",
+            ".github/workflows/*.yml",
+            "docs/access-control.md"
+          ],
+          "patterns": {
+            "mfa_check": ["mfa", "two_factor", "2fa", "totp"],
+            "secret_scan": ["secret_detection", "gitleaks", "trufflehog", "detect-secrets"]
+          }
+        },
+        "CC6.2": {
+          "description": "Prior to issuing system credentials and granting system access, the entity registers and authorizes new internal and external users",
+          "severity": "HIGH",
+          "checks": [
+            "user_provisioning_documented",
+            "access_request_process"
+          ],
+          "evidence_artifacts": ["docs/onboarding.md", "docs/access-management.md"]
+        },
+        "CC6.3": {
+          "description": "The entity authorizes, modifies, or removes access to data, software, functions, and other protected information assets based on approved and documented access requests and the system access rules",
+          "severity": "HIGH",
+          "checks": [
+            "rbac_implemented",
+            "least_privilege_documented"
+          ],
+          "evidence_artifacts": ["docs/rbac.md", "infrastructure/iam/"]
+        },
+        "CC6.6": {
+          "description": "The entity implements logical access security measures to protect against threats from sources outside its system boundaries",
+          "severity": "HIGH",
+          "checks": [
+            "dependency_scanning_enabled",
+            "sast_enabled",
+            "dast_configured"
+          ],
+          "evidence_artifacts": [".gitlab-ci.yml", "sonar-project.properties"]
+        },
+        "CC6.7": {
+          "description": "The entity restricts the transmission, movement, and removal of information to authorized internal and external users and processes, and protects it during transmission",
+          "severity": "HIGH",
+          "checks": [
+            "tls_enforced",
+            "encryption_at_rest_documented",
+            "data_classification_policy"
+          ],
+          "evidence_artifacts": ["docs/data-security.md", "infrastructure/tls/"]
+        },
+        "CC6.8": {
+          "description": "The entity implements controls to prevent or detect and act upon the introduction of unauthorized or malicious software",
+          "severity": "HIGH",
+          "checks": [
+            "container_scanning_enabled",
+            "dependency_pinning",
+            "sbom_generated"
+          ],
+          "evidence_artifacts": [".gitlab-ci.yml", "Dockerfile", "docker-compose.yml"]
+        }
+      }
+    },
+    "CC7": {
+      "name": "System Operations",
+      "controls": {
+        "CC7.1": {
+          "description": "To meet its objectives, the entity uses detection and monitoring procedures to identify (1) changes to configurations that result in the introduction of new vulnerabilities, and (2) susceptibilities to newly discovered vulnerabilities",
+          "severity": "HIGH",
+          "checks": [
+            "vulnerability_scanning_scheduled",
+            "dependency_update_automation",
+            "monitoring_configured"
+          ],
+          "evidence_artifacts": [".gitlab-ci.yml", "renovate.json", ".dependabot/config.yml"]
+        },
+        "CC7.2": {
+          "description": "The entity monitors system components and the operation of those components for anomalies that are indicative of malicious acts, natural disasters, and errors affecting the entity's ability to meet its objectives",
+          "severity": "MEDIUM",
+          "checks": [
+            "logging_configured",
+            "alerting_configured",
+            "incident_response_documented"
+          ],
+          "evidence_artifacts": ["docs/incident-response.md", "monitoring/"]
+        },
+        "CC7.4": {
+          "description": "The entity responds to identified security incidents by executing a defined incident response program to understand, contain, remediate, and communicate security incidents",
+          "severity": "HIGH",
+          "checks": [
+            "incident_response_plan",
+            "security_contact_defined"
+          ],
+          "evidence_artifacts": ["SECURITY.md", "docs/incident-response.md"]
+        }
+      }
+    },
+    "CC8": {
+      "name": "Change Management",
+      "controls": {
+        "CC8.1": {
+          "description": "The entity authorizes, designs, develops or acquires, configures, documents, tests, approves, and implements changes to infrastructure, data, software, and procedures to meet its change management objectives",
+          "severity": "HIGH",
+          "checks": [
+            "required_mr_approvals",
+            "protected_branches",
+            "ci_required_for_merge",
+            "changelog_maintained"
+          ],
+          "evidence_artifacts": [".gitlab-ci.yml", "CHANGELOG.md", "docs/change-management.md"]
+        }
+      }
+    },
+    "CC9": {
+      "name": "Risk Mitigation",
+      "controls": {
+        "CC9.1": {
+          "description": "The entity identifies, selects, and develops risk mitigation activities for risks arising from potential business disruptions",
+          "severity": "MEDIUM",
+          "checks": [
+            "backup_strategy_documented",
+            "disaster_recovery_plan"
+          ],
+          "evidence_artifacts": ["docs/disaster-recovery.md", "docs/backup-policy.md"]
+        },
+        "CC9.2": {
+          "description": "The entity assesses and manages risks associated with vendors and business partners",
+          "severity": "MEDIUM",
+          "checks": [
+            "vendor_assessment_documented",
+            "third_party_dependencies_reviewed"
+          ],
+          "evidence_artifacts": ["docs/vendor-management.md", "SBOM.json"]
+        }
+      }
+    },
+    "A1": {
+      "name": "Availability",
+      "controls": {
+        "A1.1": {
+          "description": "The entity maintains, monitors, and evaluates current processing capacity and use of system components (infrastructure, data, and software) to manage capacity demand and to enable the implementation of additional capacity to help meet its objectives",
+          "severity": "MEDIUM",
+          "checks": [
+            "capacity_monitoring_configured",
+            "scaling_policy_documented"
+          ],
+          "evidence_artifacts": ["docs/capacity-planning.md", "infrastructure/autoscaling/"]
+        },
+        "A1.2": {
+          "description": "The entity authorizes, designs, develops or acquires, implements, operates, approves, maintains, and monitors environmental protections, software, data back-up processes, and recovery infrastructure to meet its availability commitments and system requirements",
+          "severity": "HIGH",
+          "checks": [
+            "backup_automation_configured",
+            "rto_rpo_documented",
+            "recovery_tested"
+          ],
+          "evidence_artifacts": ["docs/disaster-recovery.md", ".gitlab-ci.yml"]
+        }
+      }
+    }
+  }
+}

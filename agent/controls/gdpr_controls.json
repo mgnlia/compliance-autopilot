@@ -1,0 +1,108 @@
+{
+  "framework": "GDPR",
+  "regulation": "EU 2016/679",
+  "articles": {
+    "Art5": {
+      "name": "Principles relating to processing of personal data",
+      "description": "Personal data must be processed lawfully, fairly, transparently, for specified purposes, minimally, accurately, with storage limitation, integrity and confidentiality",
+      "severity": "HIGH",
+      "checks": [
+        "privacy_policy_exists",
+        "data_minimization_documented",
+        "retention_policy_defined",
+        "lawful_basis_documented"
+      ],
+      "evidence_artifacts": ["PRIVACY.md", "docs/privacy-policy.md", "docs/data-retention.md"]
+    },
+    "Art13": {
+      "name": "Information to be provided where personal data are collected from the data subject",
+      "description": "Controller must provide information about processing at time of collection",
+      "severity": "HIGH",
+      "checks": [
+        "privacy_notice_implemented",
+        "consent_mechanism_present",
+        "data_controller_identified"
+      ],
+      "evidence_artifacts": ["docs/privacy-notice.md", "frontend/privacy/", "src/consent/"]
+    },
+    "Art17": {
+      "name": "Right to erasure ('right to be forgotten')",
+      "description": "Data subjects have the right to obtain erasure of their personal data",
+      "severity": "HIGH",
+      "checks": [
+        "deletion_api_exists",
+        "erasure_procedure_documented",
+        "soft_delete_implemented"
+      ],
+      "evidence_artifacts": ["docs/data-subject-rights.md", "api/v*/users/delete*", "src/*/delete*"]
+    },
+    "Art20": {
+      "name": "Right to data portability",
+      "description": "Data subjects have the right to receive their personal data in a structured, machine-readable format",
+      "severity": "MEDIUM",
+      "checks": [
+        "data_export_api_exists",
+        "portability_procedure_documented"
+      ],
+      "evidence_artifacts": ["api/v*/users/export*", "docs/data-portability.md"]
+    },
+    "Art25": {
+      "name": "Data protection by design and by default",
+      "description": "Controllers must implement appropriate technical and organisational measures for data protection by design",
+      "severity": "HIGH",
+      "checks": [
+        "pii_detection_in_ci",
+        "encryption_default",
+        "pseudonymization_implemented",
+        "privacy_by_design_documented"
+      ],
+      "evidence_artifacts": ["docs/privacy-by-design.md", ".gitlab-ci.yml", "infrastructure/encryption/"]
+    },
+    "Art30": {
+      "name": "Records of processing activities",
+      "description": "Controller must maintain a record of processing activities under its responsibility",
+      "severity": "HIGH",
+      "checks": [
+        "ropa_documented",
+        "data_flows_mapped",
+        "processing_inventory_maintained"
+      ],
+      "evidence_artifacts": ["docs/ropa.md", "docs/data-flow-diagram.md", "compliance/ropa.json"]
+    },
+    "Art32": {
+      "name": "Security of processing",
+      "description": "Controller must implement appropriate technical and organisational measures to ensure security appropriate to the risk",
+      "severity": "HIGH",
+      "checks": [
+        "encryption_at_rest",
+        "encryption_in_transit",
+        "access_controls_implemented",
+        "security_testing_automated",
+        "vulnerability_management"
+      ],
+      "evidence_artifacts": ["docs/security.md", ".gitlab-ci.yml", "infrastructure/security/"]
+    },
+    "Art33": {
+      "name": "Notification of a personal data breach to the supervisory authority",
+      "description": "In case of breach, controller must notify supervisory authority within 72 hours",
+      "severity": "HIGH",
+      "checks": [
+        "breach_response_plan_exists",
+        "breach_notification_procedure",
+        "dpa_contact_documented"
+      ],
+      "evidence_artifacts": ["docs/breach-response.md", "SECURITY.md", "docs/incident-response.md"]
+    },
+    "Art35": {
+      "name": "Data protection impact assessment",
+      "description": "Where processing is likely to result in high risk, controller must carry out DPIA",
+      "severity": "HIGH",
+      "checks": [
+        "dpia_template_exists",
+        "high_risk_processing_assessed",
+        "dpo_consulted"
+      ],
+      "evidence_artifacts": ["docs/dpia.md", "compliance/dpia/", "docs/dpo-consultation.md"]
+    }
+  }
+}

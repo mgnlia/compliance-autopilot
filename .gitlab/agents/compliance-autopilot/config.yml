@@ -1,0 +1,114 @@
+# Compliance Autopilot — GitLab Duo External Agent Configuration
+# GitLab Duo Agent Platform (External Agent)
+# https://docs.gitlab.com/user/duo_agent_platform/agents/external/
+
+injectGatewayToken: false
+
+image: python:3.12-slim
+
+commands:
+  - echo "=== Compliance Autopilot starting ==="
+  - apt-get update --quiet && apt-get install --yes curl wget gpg git jq && rm -rf /var/lib/apt/lists/*
+
+  # Install glab CLI
+  - echo "Installing glab CLI..."
+  - curl --silent --show-error --location "https://raw.githubusercontent.com/upciti/wakemeops/main/assets/install_repository" | bash
+  - apt-get install -y glab
+
+  # Configure glab
+  - mkdir -p ~/.config/glab-cli
+  - |
+    cat > ~/.config/glab-cli/config.yml <<EOF
+    hosts:
+      ${GITLAB_HOST:-gitlab.com}:
+        token: $AI_FLOW_GITLAB_TOKEN
+        is_oauth2: "true"
+        client_id: "bypass"
+        oauth2_refresh_token: ""
+        oauth2_expiry_date: "01 Jan 50 00:00 UTC"
+        api_host: ${GITLAB_HOST:-gitlab.com}
+        user: ComplianceAutopilot
+        check_update: "false"
+        git_protocol: https
+    EOF
+  - chmod 600 ~/.config/glab-cli/config.yml
+
+  # Configure git
+  - git config --global user.email "compliance-autopilot@gitlab.com"
+  - git config --global user.name "Compliance Autopilot"
+  - git remote set-url origin https://gitlab-ci-token:$AI_FLOW_GITLAB_TOKEN@${AI_FLOW_GITLAB_HOSTNAME:-gitlab.com}/$AI_FLOW_PROJECT_PATH.git
+
+  # Install uv and Python dependencies
+  - echo "Installing uv..."
+  - curl -LsSf https://astral.sh/uv/install.sh | sh
+  - export PATH="$HOME/.cargo/bin:$PATH"
+
+  # Clone the agent repo and install deps
+  - echo "Setting up compliance agent..."
+  - git clone https://gitlab-ci-token:$AI_FLOW_GITLAB_TOKEN@${AI_FLOW_GITLAB_HOSTNAME:-gitlab.com}/$AI_FLOW_AGENT_PROJECT_PATH /tmp/compliance-autopilot 2>/dev/null || true
+  - |
+    if [ -d "/tmp/compliance-autopilot/agent" ]; then
+      cd /tmp/compliance-autopilot
+      uv sync --frozen
+      echo "Running compliance agent from cloned repo..."
+      uv run python agent/compliance_agent.py
+    else
+      echo "Agent source not found, using embedded mode..."
+      pip install anthropic python-gitlab gitpython 2>/dev/null
+      python3 -c "
+import os, sys, json, subprocess, anthropic, gitlab
+
+ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
+GITLAB_TOKEN = os.environ.get('AI_FLOW_GITLAB_TOKEN', '')
+GITLAB_HOST = os.environ.get('AI_FLOW_GITLAB_HOSTNAME', 'gitlab.com')
+PROJECT_PATH = os.environ.get('AI_FLOW_PROJECT_PATH', '')
+CONTEXT = os.environ.get('AI_FLOW_CONTEXT', '{}')
+INPUT_TEXT = os.environ.get('AI_FLOW_INPUT', 'scan soc2')
+EVENT = os.environ.get('AI_FLOW_EVENT', 'mention')
+
+client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+gl = gitlab.Gitlab(f'https://{GITLAB_HOST}', private_token=GITLAB_TOKEN)
+
+try:
+    project = gl.projects.get(PROJECT_PATH)
+    files_info = []
+    for item in project.repository_tree(recursive=True, all=True):
+        if item['type'] == 'blob' and any(item['path'].endswith(ext) for ext in ['.yml', '.yaml', '.py', '.js', '.ts', '.json', '.md', '.tf', '.go']):
+            files_info.append(item['path'])
+    files_summary = '\n'.join(files_info[:100])
+except Exception as e:
+    files_summary = f'Could not list files: {e}'
+
+message = client.messages.create(
+    model='claude-sonnet-4-20250514',
+    max_tokens=4096,
+    messages=[{
+        'role': 'user',
+        'content': f'''You are Compliance Autopilot, a GitLab Duo Agent specializing in SOC2 and GDPR compliance.
+
+Repository: {PROJECT_PATH}
+Repository files:
+{files_summary}
+
+Context from GitLab:
+{CONTEXT[:2000]}
+
+User request: {INPUT_TEXT}
+
+Analyze this repository for compliance issues. Provide:
+1. A structured compliance scan report
+2. Specific findings with severity (HIGH/MEDIUM/LOW)
+3. Evidence references (file paths, line numbers, MR numbers)
+4. Remediation recommendations
+
+Format your response as a GitLab-flavored Markdown comment.'''
+    }]
+)
+
+print(message.content[0].text)
+"
+    fi
+
+variables:
+  - ANTHROPIC_API_KEY
+  - AI_FLOW_AGENT_PROJECT_PATH
