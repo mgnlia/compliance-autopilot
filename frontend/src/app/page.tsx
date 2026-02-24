@@ -8,19 +8,19 @@ export default function Home() {
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const handleScan = async (projectUrl: string) => {
+  const handleScan = async (projectUrl: string, gitlabToken?: string) => {
     setLoading(true);
     setScanResult(null);
     try {
       const res = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project_url: projectUrl }),
+        body: JSON.stringify({ project_url: projectUrl, gitlab_token: gitlabToken }),
       });
       const data = await res.json();
       setScanResult(data);
     } catch {
-      setScanResult(getMockResult(projectUrl));
+      setScanResult(null);
     } finally {
       setLoading(false);
     }
@@ -39,7 +39,7 @@ export default function Home() {
               Compliance Autopilot
             </h1>
             <p className="text-gray-400 text-sm mt-0.5">
-              GitLab Duo Agent · SOC2 / GDPR drift detection + audit evidence · Powered by Claude
+              Claude-powered GitLab compliance agent · SOC2 / GDPR drift detection · Real GitLab API data
             </p>
           </div>
           <div className="ml-auto flex gap-2">
@@ -47,7 +47,7 @@ export default function Home() {
               GitLab AI Hackathon
             </span>
             <span className="px-3 py-1 rounded-full text-xs bg-purple-500/20 text-purple-400 border border-purple-500/30">
-              Claude-Powered
+              Powered by Claude
             </span>
           </div>
         </div>
@@ -69,7 +69,7 @@ export default function Home() {
                 </div>
               ))}
             </div>
-            <p className="text-sm">Claude agents scanning your project…</p>
+            <p className="text-sm">Claude agents scanning your GitLab project via API…</p>
           </div>
         )}
 
@@ -81,13 +81,13 @@ export default function Home() {
   );
 }
 
-function DemoPreview({ onScan }: { onScan: (url: string) => void }) {
+function DemoPreview({ onScan }: { onScan: (url: string, token?: string) => void }) {
   return (
     <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-4">
       {[
-        { icon: "🔍", title: "Drift Detection", desc: "Scans MRs, pipelines, issues and settings for SOC2/GDPR violations in real time." },
-        { icon: "🤖", title: "Claude Analysis", desc: "4 specialized agents (Planner, Scanner, Analyzer, Reporter) collaborate to assess compliance posture." },
-        { icon: "📋", title: "Audit Evidence", desc: "Generates structured Markdown + JSON evidence reports ready for auditors — one click." },
+        { icon: "🔍", title: "Real GitLab API Scan", desc: "Calls GitLab REST API v4 to fetch branch protection, MR approvals, CI variables, and audit events." },
+        { icon: "🤖", title: "Claude Analysis", desc: "4 specialized agents (Planner, Scanner, Analyzer, Reporter) analyze real project data for SOC2/GDPR violations." },
+        { icon: "📋", title: "Audit Evidence", desc: "Generates structured Markdown evidence reports based on actual findings — ready for auditors." },
       ].map((f) => (
         <div key={f.title} className="rounded-2xl bg-white/5 border border-white/10 p-6">
           <div className="text-3xl mb-3">{f.icon}</div>
@@ -97,14 +97,14 @@ function DemoPreview({ onScan }: { onScan: (url: string) => void }) {
       ))}
       <div className="md:col-span-3 rounded-2xl bg-white/5 border border-white/10 p-6 flex items-center justify-between">
         <div>
-          <p className="text-white font-medium">Try a demo scan</p>
-          <p className="text-gray-400 text-sm">Uses mock data — no GitLab token required</p>
+          <p className="text-white font-medium">Try with a public GitLab project</p>
+          <p className="text-gray-400 text-sm">Scans real public project data via GitLab API · No token required for public repos</p>
         </div>
         <button
-          onClick={() => onScan("https://gitlab.com/demo/sample-project")}
+          onClick={() => onScan("https://gitlab.com/gitlab-org/gitlab-runner")}
           className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-purple-600 text-white font-medium hover:opacity-90 transition-opacity"
         >
-          Run Demo Scan →
+          Scan gitlab-runner →
         </button>
       </div>
     </div>
@@ -119,6 +119,7 @@ export interface ScanResult {
   evidence_markdown: string;
   agents_log: AgentLog[];
   scanned_at: string;
+  data_source?: string;
 }
 
 export interface Finding {
@@ -137,50 +138,4 @@ export interface AgentLog {
   action: string;
   result: string;
   duration_ms: number;
-}
-
-function getMockResult(projectUrl: string): ScanResult {
-  return {
-    project_url: projectUrl,
-    score: 61,
-    grade: "C",
-    scanned_at: new Date().toISOString(),
-    agents_log: [
-      { agent: "PlannerAgent", action: "Enumerate compliance surfaces", result: "Found 4 surfaces: MRs, Pipelines, Issues, Settings", duration_ms: 312 },
-      { agent: "ScannerAgent", action: "Scan MR approval rules", result: "2 critical findings: no required approvals on 3 MRs", duration_ms: 891 },
-      { agent: "AnalyzerAgent", action: "Cross-reference SOC2 CC6.1", result: "Access control drift detected in 2 pipelines", duration_ms: 1203 },
-      { agent: "ReporterAgent", action: "Generate evidence bundle", result: "Report generated: 4 findings, 2 critical", duration_ms: 445 },
-    ],
-    findings: [
-      {
-        id: "F001", severity: "critical", framework: "SOC2", control: "CC6.1",
-        title: "MRs merged without required approvals",
-        description: "3 merge requests in the last 30 days were merged with 0 approvals, violating SOC2 CC6.1 access control requirements.",
-        remediation: "Enable 'Require approvals' in Settings → Merge Requests and set minimum approvals to 2.",
-        artifact: "MR !42, !51, !67",
-      },
-      {
-        id: "F002", severity: "critical", framework: "GDPR", control: "Art. 32",
-        title: "Pipeline logs may contain PII",
-        description: "CI pipeline logs in 2 jobs contain email addresses and IP addresses in plaintext, violating GDPR Art. 32 data minimization.",
-        remediation: "Add log masking rules in .gitlab-ci.yml and enable 'Mask variable' for all sensitive env vars.",
-        artifact: "Pipeline #1024, Job: deploy-prod",
-      },
-      {
-        id: "F003", severity: "high", framework: "SOC2", control: "CC7.2",
-        title: "No branch protection on main",
-        description: "The main branch has no push rules, allowing force-pushes and direct commits bypassing review.",
-        remediation: "Enable branch protection in Settings → Repository → Protected Branches.",
-        artifact: "Branch: main",
-      },
-      {
-        id: "F004", severity: "medium", framework: "GDPR", control: "Art. 30",
-        title: "No data processing record in project description",
-        description: "Project handles user data but has no documented data processing activities in the repository.",
-        remediation: "Add a DATA_PROCESSING.md file documenting data flows per GDPR Art. 30.",
-        artifact: "Repository root",
-      },
-    ],
-    evidence_markdown: `# Compliance Audit Evidence\n\n**Project:** ${projectUrl}\n**Scan Date:** ${new Date().toUTCString()}\n**Score:** 61/100 (Grade C)\n\n## Findings Summary\n\n| ID | Severity | Framework | Control | Title |\n|----|----------|-----------|---------|-------|\n| F001 | 🔴 Critical | SOC2 | CC6.1 | MRs merged without required approvals |\n| F002 | 🔴 Critical | GDPR | Art. 32 | Pipeline logs may contain PII |\n| F003 | 🟠 High | SOC2 | CC7.2 | No branch protection on main |\n| F004 | 🟡 Medium | GDPR | Art. 30 | No data processing record |\n\n## Agent Execution Log\n\n- PlannerAgent: Enumerate compliance surfaces → 312ms\n- ScannerAgent: Scan MR approval rules → 891ms\n- AnalyzerAgent: Cross-reference SOC2 CC6.1 → 1203ms\n- ReporterAgent: Generate evidence bundle → 445ms\n`,
-  };
 }
