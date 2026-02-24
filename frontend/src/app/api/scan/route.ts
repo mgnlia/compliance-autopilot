@@ -3,170 +3,65 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const client = new Anthropic();
 
-export async function POST(req: NextRequest) {
-  const { project_url } = await req.json();
-  if (!project_url) {
-    return NextResponse.json({ error: "project_url required" }, { status: 400 });
-  }
+// ---------------------------------------------------------------------------
+// GitLab API v4 helpers
+// ---------------------------------------------------------------------------
 
-  const startTime = Date.now();
-  const agents_log: AgentLog[] = [];
+async function gitlabGet(path: string, token?: string) {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["PRIVATE-TOKEN"] = token;
+  const res = await fetch(`https://gitlab.com/api/v4${path}`, { headers });
+  if (!res.ok) return null;
+  return res.json();
+}
 
+function encodeProjectId(url: string): string {
+  // https://gitlab.com/group/subgroup/project  →  "group%2Fsubgroup%2Fproject"
+  const match = url.match(/gitlab\.com\/(.+?)(?:\.git)?(?:\/)?$/);
+  if (!match) throw new Error("Cannot parse GitLab project URL: " + url);
+  return encodeURIComponent(match[1]);
+}
+
+// ---------------------------------------------------------------------------
+// Real GitLab data fetch
+// ---------------------------------------------------------------------------
+
+interface GitLabData {
+  project: Record<string, unknown> | null;
+  protectedBranches: unknown[];
+  mergeRequests: unknown[];
+  variables: unknown[];
+  auditEvents: unknown[];
+}
+
+async function fetchGitLabData(projectUrl: string, token?: string): Promise<GitLabData> {
+  let pid: string;
   try {
-    // PlannerAgent — enumerate compliance surfaces
-    const plannerStart = Date.now();
-    const plannerMsg = await client.messages.create({
-      model: "claude-opus-4-5",
-      max_tokens: 512,
-      messages: [
-        {
-          role: "user",
-          content: `You are PlannerAgent, a compliance planning specialist. Given a GitLab project URL, enumerate the key compliance surfaces to scan for SOC2 and GDPR drift. Be concise. Project: ${project_url}`,
-        },
-      ],
-    });
-    const plannerResult = (plannerMsg.content[0] as { text: string }).text.slice(0, 200);
-    agents_log.push({ agent: "PlannerAgent", action: "Enumerate compliance surfaces", result: plannerResult, duration_ms: Date.now() - plannerStart });
-
-    // ScannerAgent — scan for specific violations
-    const scannerStart = Date.now();
-    const scannerMsg = await client.messages.create({
-      model: "claude-opus-4-5",
-      max_tokens: 1024,
-      messages: [
-        {
-          role: "user",
-          content: `You are ScannerAgent, a compliance scanner. Analyze this GitLab project for SOC2 and GDPR violations. Generate a JSON array of findings with fields: id, severity (critical/high/medium/low), framework (SOC2/GDPR), control, title, description, remediation, artifact. Generate 3-5 realistic findings. Project: ${project_url}. Return ONLY valid JSON array.`,
-        },
-      ],
-    });
-    const scannerText = (scannerMsg.content[0] as { text: string }).text;
-    let findings: Finding[] = [];
-    try {
-      const jsonMatch = scannerText.match(/\[[\s\S]*\]/);
-      if (jsonMatch) findings = JSON.parse(jsonMatch[0]);
-    } catch {
-      findings = getDefaultFindings(project_url);
-    }
-    agents_log.push({ agent: "ScannerAgent", action: "Scan for SOC2/GDPR violations", result: `Found ${findings.length} findings`, duration_ms: Date.now() - scannerStart });
-
-    // AnalyzerAgent — risk scoring
-    const analyzerStart = Date.now();
-    const analyzerMsg = await client.messages.create({
-      model: "claude-opus-4-5",
-      max_tokens: 256,
-      messages: [
-        {
-          role: "user",
-          content: `You are AnalyzerAgent. Given these compliance findings, calculate a compliance score 0-100 and grade (A/B/C/D/F). Critical = -25pts, High = -15pts, Medium = -8pts, Low = -3pts. Start from 100. Respond with JSON: {"score": N, "grade": "X"}. Findings: ${JSON.stringify(findings.map(f => f.severity))}`,
-        },
-      ],
-    });
-    const analyzerText = (analyzerMsg.content[0] as { text: string }).text;
-    let score = 70, grade = "C";
-    try {
-      const match = analyzerText.match(/\{[\s\S]*\}/);
-      if (match) ({ score, grade } = JSON.parse(match[0]));
-    } catch {
-      const criticals = findings.filter(f => f.severity === "critical").length;
-      const highs = findings.filter(f => f.severity === "high").length;
-      score = Math.max(0, 100 - criticals * 25 - highs * 15 - findings.filter(f => f.severity === "medium").length * 8);
-      grade = score >= 90 ? "A" : score >= 75 ? "B" : score >= 60 ? "C" : score >= 45 ? "D" : "F";
-    }
-    agents_log.push({ agent: "AnalyzerAgent", action: "Calculate compliance risk score", result: `Score: ${score}/100 (${grade})`, duration_ms: Date.now() - analyzerStart });
-
-    // ReporterAgent — generate evidence markdown
-    const reporterStart = Date.now();
-    const evidenceMarkdown = generateEvidence(project_url, score, grade, findings);
-    agents_log.push({ agent: "ReporterAgent", action: "Generate audit evidence bundle", result: `Evidence report generated: ${findings.length} findings documented`, duration_ms: Date.now() - reporterStart });
-
-    return NextResponse.json({
-      project_url,
-      score,
-      grade,
-      findings,
-      evidence_markdown: evidenceMarkdown,
-      agents_log,
-      scanned_at: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error("Scan error:", error);
-    return NextResponse.json(getMockResult(project_url), { status: 200 });
+    pid = encodeProjectId(projectUrl);
+  } catch {
+    return { project: null, protectedBranches: [], mergeRequests: [], variables: [], auditEvents: [] };
   }
-}
 
-function generateEvidence(projectUrl: string, score: number, grade: string, findings: Finding[]): string {
-  return `# Compliance Audit Evidence
-**Project:** ${projectUrl}
-**Scan Date:** ${new Date().toUTCString()}
-**Score:** ${score}/100 (Grade ${grade})
-**Generated by:** Compliance Autopilot (Claude-powered GitLab Duo Agent)
+  const [project, protectedBranches, mergeRequests, variables, auditEvents] = await Promise.all([
+    gitlabGet(`/projects/${pid}`, token),
+    gitlabGet(`/projects/${pid}/protected_branches`, token),
+    gitlabGet(`/projects/${pid}/merge_requests?state=merged&per_page=20`, token),
+    gitlabGet(`/projects/${pid}/variables`, token),
+    gitlabGet(`/projects/${pid}/audit_events?per_page=10`, token),
+  ]);
 
-## Executive Summary
-${findings.filter(f => f.severity === "critical").length} critical and ${findings.filter(f => f.severity === "high").length} high severity compliance drift issues detected.
-
-## Findings
-
-${findings.map(f => `### ${f.id} — ${f.title}
-- **Severity:** ${f.severity.toUpperCase()}
-- **Framework:** ${f.framework} · ${f.control}
-- **Description:** ${f.description}
-- **Remediation:** ${f.remediation}
-- **Artifact:** \`${f.artifact}\`
-`).join("\n")}
-
-## Remediation Priority
-1. Address all CRITICAL findings within 24 hours
-2. Address HIGH findings within 7 days
-3. Schedule MEDIUM/LOW for next sprint
-
----
-*This report was generated automatically by Compliance Autopilot. Review with your compliance team before submission to auditors.*`;
-}
-
-function getDefaultFindings(projectUrl: string): Finding[] {
-  return [
-    {
-      id: "F001", severity: "critical", framework: "SOC2", control: "CC6.1",
-      title: "Merge requests lack required approvals",
-      description: "Multiple MRs were merged without the required number of approvals, violating access control requirements.",
-      remediation: "Enable required approvals in Settings → Merge Requests.",
-      artifact: "MR history",
-    },
-    {
-      id: "F002", severity: "high", framework: "GDPR", control: "Art. 32",
-      title: "Sensitive data in CI logs",
-      description: "Pipeline logs may expose PII or credentials in plaintext.",
-      remediation: "Enable log masking and audit all CI variables.",
-      artifact: "CI/CD Pipelines",
-    },
-    {
-      id: "F003", severity: "medium", framework: "SOC2", control: "CC7.2",
-      title: "No branch protection configured",
-      description: "Default branch lacks push protection rules.",
-      remediation: "Configure protected branches in repository settings.",
-      artifact: "Repository Settings",
-    },
-  ];
-}
-
-function getMockResult(projectUrl: string) {
-  const findings = getDefaultFindings(projectUrl);
   return {
-    project_url: projectUrl,
-    score: 65,
-    grade: "C",
-    findings,
-    evidence_markdown: generateEvidence(projectUrl, 65, "C", findings),
-    agents_log: [
-      { agent: "PlannerAgent", action: "Enumerate compliance surfaces", result: "4 surfaces identified", duration_ms: 300 },
-      { agent: "ScannerAgent", action: "Scan for violations", result: "3 findings", duration_ms: 800 },
-      { agent: "AnalyzerAgent", action: "Calculate risk score", result: "65/100 (C)", duration_ms: 400 },
-      { agent: "ReporterAgent", action: "Generate evidence", result: "Report ready", duration_ms: 200 },
-    ],
-    scanned_at: new Date().toISOString(),
+    project: project ?? null,
+    protectedBranches: Array.isArray(protectedBranches) ? protectedBranches : [],
+    mergeRequests: Array.isArray(mergeRequests) ? mergeRequests : [],
+    variables: Array.isArray(variables) ? variables : [],
+    auditEvents: Array.isArray(auditEvents) ? auditEvents : [],
   };
 }
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface Finding {
   id: string;
@@ -184,4 +79,182 @@ interface AgentLog {
   action: string;
   result: string;
   duration_ms: number;
+}
+
+// ---------------------------------------------------------------------------
+// Evidence generator
+// ---------------------------------------------------------------------------
+
+function generateEvidence(projectUrl: string, score: number, grade: string, findings: Finding[]): string {
+  const criticals = findings.filter(f => f.severity === "critical").length;
+  const highs = findings.filter(f => f.severity === "high").length;
+  return `# Compliance Audit Evidence
+**Project:** ${projectUrl}
+**Scan Date:** ${new Date().toUTCString()}
+**Score:** ${score}/100 (Grade ${grade})
+**Generated by:** Compliance Autopilot — Claude-powered GitLab compliance agent
+
+## Executive Summary
+${criticals} critical and ${highs} high severity compliance drift issues detected across SOC2 and GDPR controls.
+
+## Findings
+
+${findings.map(f => `### ${f.id} — ${f.title}
+- **Severity:** ${f.severity.toUpperCase()}
+- **Framework:** ${f.framework} · ${f.control}
+- **Description:** ${f.description}
+- **Remediation:** ${f.remediation}
+- **Artifact:** \`${f.artifact}\`
+`).join("\n")}
+
+## Remediation Priority
+1. Address all CRITICAL findings within 24 hours
+2. Address HIGH findings within 7 days
+3. Schedule MEDIUM/LOW for next sprint
+
+---
+*This report was generated automatically by Compliance Autopilot using real GitLab API data. Review with your compliance team before submission to auditors.*`;
+}
+
+// ---------------------------------------------------------------------------
+// Route handler
+// ---------------------------------------------------------------------------
+
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+  const { project_url, gitlab_token } = body as { project_url?: string; gitlab_token?: string };
+
+  if (!project_url) {
+    return NextResponse.json({ error: "project_url required" }, { status: 400 });
+  }
+
+  const agents_log: AgentLog[] = [];
+
+  // ── PlannerAgent ──────────────────────────────────────────────────────────
+  const plannerStart = Date.now();
+  let gitlabData: GitLabData;
+  try {
+    gitlabData = await fetchGitLabData(project_url, gitlab_token);
+  } catch {
+    gitlabData = { project: null, protectedBranches: [], mergeRequests: [], variables: [], auditEvents: [] };
+  }
+
+  const dataAvailable = gitlabData.project !== null;
+  const plannerSummary = dataAvailable
+    ? `Fetched: project metadata, ${gitlabData.protectedBranches.length} protected branches, ${gitlabData.mergeRequests.length} merged MRs, ${gitlabData.variables.length} CI variables, ${gitlabData.auditEvents.length} audit events`
+    : `GitLab API returned no data (project may be private — provide a token for full scan). Proceeding with structural analysis.`;
+
+  agents_log.push({
+    agent: "PlannerAgent",
+    action: "Fetch GitLab project data via REST API v4",
+    result: plannerSummary,
+    duration_ms: Date.now() - plannerStart,
+  });
+
+  // ── ScannerAgent ──────────────────────────────────────────────────────────
+  const scannerStart = Date.now();
+
+  // Build a factual context string from real API data
+  const apiContext = JSON.stringify({
+    project_url,
+    project: gitlabData.project
+      ? {
+          visibility: (gitlabData.project as Record<string, unknown>).visibility,
+          default_branch: (gitlabData.project as Record<string, unknown>).default_branch,
+          merge_requests_access_level: (gitlabData.project as Record<string, unknown>).merge_requests_access_level,
+          approvals_before_merge: (gitlabData.project as Record<string, unknown>).approvals_before_merge,
+        }
+      : null,
+    protected_branches: gitlabData.protectedBranches,
+    merged_mrs_sample: gitlabData.mergeRequests.slice(0, 5).map((mr: unknown) => {
+      const m = mr as Record<string, unknown>;
+      return { iid: m.iid, merged_by: m.merged_by, approvals_count: (m as Record<string, unknown>).approvals_count ?? "unknown" };
+    }),
+    ci_variables_masked: gitlabData.variables.map((v: unknown) => {
+      const variable = v as Record<string, unknown>;
+      return { key: variable.key, masked: variable.masked, protected: variable.protected };
+    }),
+    audit_events_count: gitlabData.auditEvents.length,
+  }, null, 2);
+
+  const scannerMsg = await client.messages.create({
+    model: "claude-opus-4-5",
+    max_tokens: 1500,
+    messages: [
+      {
+        role: "user",
+        content: `You are ScannerAgent, a GitLab compliance analyst specializing in SOC2 and GDPR.
+
+Below is REAL data fetched from the GitLab REST API v4 for this project. Analyze it for actual compliance violations. Do NOT invent findings — base every finding strictly on what the data shows. If data is null/missing, note it as "data unavailable" and flag it as a finding only if absence itself is a risk.
+
+GitLab API Data:
+${apiContext}
+
+Return a JSON array of findings. Each finding must have:
+- id: "F001", "F002", etc.
+- severity: "critical" | "high" | "medium" | "low"
+- framework: "SOC2" | "GDPR"
+- control: e.g. "CC6.1", "Art. 32"
+- title: short title
+- description: what the data shows (cite specific values from the API data)
+- remediation: concrete fix
+- artifact: specific resource (branch name, MR IID, variable key, etc.)
+
+Return ONLY a valid JSON array, no prose.`,
+      },
+    ],
+  });
+
+  const scannerText = (scannerMsg.content[0] as { text: string }).text;
+  let findings: Finding[] = [];
+  try {
+    const jsonMatch = scannerText.match(/\[[\s\S]*\]/);
+    if (jsonMatch) findings = JSON.parse(jsonMatch[0]);
+  } catch {
+    findings = [];
+  }
+
+  agents_log.push({
+    agent: "ScannerAgent",
+    action: "Analyze GitLab API data for SOC2/GDPR violations",
+    result: `Found ${findings.length} findings based on real project data`,
+    duration_ms: Date.now() - scannerStart,
+  });
+
+  // ── AnalyzerAgent ─────────────────────────────────────────────────────────
+  const analyzerStart = Date.now();
+  const criticals = findings.filter(f => f.severity === "critical").length;
+  const highs = findings.filter(f => f.severity === "high").length;
+  const mediums = findings.filter(f => f.severity === "medium").length;
+  const lows = findings.filter(f => f.severity === "low").length;
+  const score = Math.max(0, Math.min(100, 100 - criticals * 25 - highs * 15 - mediums * 8 - lows * 3));
+  const grade = score >= 90 ? "A" : score >= 75 ? "B" : score >= 60 ? "C" : score >= 45 ? "D" : "F";
+
+  agents_log.push({
+    agent: "AnalyzerAgent",
+    action: "Calculate compliance risk score",
+    result: `Score: ${score}/100 (${grade}) — ${criticals} critical, ${highs} high, ${mediums} medium, ${lows} low`,
+    duration_ms: Date.now() - analyzerStart,
+  });
+
+  // ── ReporterAgent ─────────────────────────────────────────────────────────
+  const reporterStart = Date.now();
+  const evidenceMarkdown = generateEvidence(project_url, score, grade, findings);
+  agents_log.push({
+    agent: "ReporterAgent",
+    action: "Generate audit evidence bundle",
+    result: `Evidence report generated: ${findings.length} findings documented`,
+    duration_ms: Date.now() - reporterStart,
+  });
+
+  return NextResponse.json({
+    project_url,
+    score,
+    grade,
+    findings,
+    evidence_markdown: evidenceMarkdown,
+    agents_log,
+    scanned_at: new Date().toISOString(),
+    data_source: dataAvailable ? "gitlab_api_v4" : "claude_analysis_only",
+  });
 }
